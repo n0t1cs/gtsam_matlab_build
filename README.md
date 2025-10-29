@@ -52,7 +52,7 @@ free -h
 ```bash
 
 # Clone the repository
-git clone https://github.com/n0t1cs/gtsam-matlab-build.git
+git clone https://github.com/n0t1cs/gtsam_matlab_build.git
 cd gtsam-matlab-installation
 
 # List files to verify
