@@ -94,7 +94,7 @@ pip3 install --break-system-packages . 2>&1 | tee /tmp/gtwrap_install.log || {
   }
 }
 
-python3 -c "import gtwrap; print('gtwrap version:', gtwrap.__version__)" || {
+python3 -c "import gtwrap; print('gtwrap installed with success')" || {
   echo -e "${RED}ERROR: gtwrap import failed${NC}"
   exit 1
 }
