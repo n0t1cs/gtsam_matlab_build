@@ -69,6 +69,7 @@ echo -e "\n${GREEN}[Step 2/9] Verifying source directories...${NC}"
 
 if [ ! -d "$GTSAM_DIR" ]; then
   echo -e "${YELLOW}Cloning GTSAM repository...${NC}"
+  mkdir -p "$HOME_FOR_GTSAM"
   cd "$HOME_FOR_GTSAM"
   git clone https://github.com/borglab/gtsam.git
 fi
