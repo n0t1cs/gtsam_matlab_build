@@ -120,8 +120,8 @@ cmake -DCMAKE_BUILD_TYPE=Release \
   -DMATLAB_ROOT=$MATLAB_ROOT \
   -DMEX_COMMAND=$MATLAB_ROOT/bin/mex \
   -DGTSAM_TOOLBOX_INSTALL_PATH=$MATLAB_TOOLBOX_PATH \
-  -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX
-  ..
+  -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX ..
+  
 
 echo -e "${GREEN}CMake configuration complete!${NC}"
 read -p "Press enter to continue with build..."
