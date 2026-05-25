@@ -1,275 +1,240 @@
-# GTSAM MATLAB Installation Repository
+# GTSAM Build Repository
 
-Complete guide to install GTSAM with MATLAB support. Includes automated setup script and verification test.
+Automated build scripts for [GTSAM](https://github.com/borglab/gtsam) on Linux. Three independent scripts cover the three common usage scenarios: C++ library only, library + MATLAB toolbox, and library + Python wrapper.
 
-**Table of Contents:**
+**Table of Contents**
 
-- [What You Get](#what-you-get)
-- [Requirements](#requirements)
-- [Step-by-Step Installation](#step-by-step-installation)
-- [Using the MATLAB Test](#using-the-matlab-test)
+- [Repository Contents](#repository-contents)
+- [What Changed (v2.3)](#what-changed-v23)
+- [Common Build Configuration](#common-build-configuration)
+- [Script 1 — `gtsam_build.sh` (library only)](#script-1--gtsam_buildsh-library-only)
+- [Script 2 — `gtsam_matlab_build.sh` (library + MATLAB toolbox)](#script-2--gtsam_matlab_buildsh-library--matlab-toolbox)
+- [Script 3 — `gtsam_python_build` (library + Python wrapper)](#script-3--gtsam_python_build-library--python-wrapper)
+- [Verification](#verification)
 - [Troubleshooting](#troubleshooting)
+- [System Information](#system-information)
 
 ---
 
-## What You Get
+## Repository Contents
 
-This repository automates the complete GTSAM installation:
+| File                    | Purpose                                                              |
+| ----------------------- | -------------------------------------------------------------------- |
+| `gtsam_build.sh`        | Minimal GTSAM C++ build & install (no MATLAB, no Python).            |
+| `gtsam_matlab_build.sh` | Full GTSAM build with MATLAB toolbox + MATLAB libstdc++ compat fix.  |
+| `gtsam_python_build`    | GTSAM build with Python wrapper (`gtsam` importable from `python3`). |
+| `gtsam_test.m`          | MATLAB verification test (10 tests).                                 |
+| `README.md`             | This guide.                                                          |
 
-| File             | Purpose                               |
-| ---------------- | ------------------------------------- |
-| `gtsam_build.sh` | 11-step automated installation script |
-| `gtsam_test.m`   | MATLAB verification test (10 tests)   |
-| `README.md`      | This guide                            |
-
----
-
-## Requirements
-
-### Check Your System
-
-```bash
-# Check Ubuntu version
-lsb_release -a
-
-# Check MATLAB is installed
-which matlab
-# Should show: /usr/local/MATLAB/R20XX*/bin/matlab
-
-# Check available disk space
-df -h
-# Should have at least 5 GB free in /home
-
-# Check RAM
-free -h
-# Should show at least 8 GB
-```
+All scripts target **GTSAM `4.2a9`** and install to `/usr/local` by default.
 
 ---
 
-## Step-by-Step Installation
+## What Changed (v2.3)
 
-### Step 1: Clone This Repository
+The repo previously shipped a single combined script (`gtsam_build.sh`) that always built the MATLAB toolbox. It has been split into three scoped scripts so users without MATLAB (or who only need Python bindings) do not need to edit anything out.
 
-```bash
+- **NEW** — `gtsam_build.sh` now builds only the C++ library. Intended for headless/container use (e.g. distrobox). No MATLAB or Python dependencies pulled in.
+- **NEW** — `gtsam_python_build` builds and installs the Python wrapper via `pip3` (`gtwrap` is installed automatically). Runs `make python-install`.
+- **RENAMED** — the previous MATLAB-aware script is now `gtsam_matlab_build.sh`. Behavior is unchanged except step numbering was condensed from 11 steps to 9 steps.
+- All three scripts now configure GTSAM with `GTSAM_THROW_CHEIRALITY_EXCEPTION=OFF` so that `SmartProjectionPoseFactor` does not throw on cheirality during projection. The library-only and Python scripts additionally verify that flag is absent in the installed `config.h`.
+- `GTSAM_BUILD_WITH_MARCH_NATIVE=OFF` is set everywhere to keep the binaries portable between host machines (important when building inside a container and running on the host).
+- All scripts register `/usr/local/lib` in `/etc/ld.so.conf.d/gtsam.conf` and run `ldconfig`, so manual `LD_LIBRARY_PATH` exports are no longer required system-wide (only the MATLAB script still exports it in `~/.bashrc` as a safety net for MATLAB sessions).
+- The library-only and Python scripts use `git fetch --all --tags` + `git checkout 4.2a9` to pin the version. The Python script additionally runs `git submodule update --init --recursive`.
 
-# Clone the repository
-git clone https://github.com/n0t1cs/gtsam_matlab_build.git
-cd gtsam-matlab-installation
+---
 
-# List files to verify
-ls -la
-# You should see: gtsam_build.sh, gtsam_test.m, README.md
-```
+## Common Build Configuration
 
-### Step 2: Open and Configure the Installation Script
-
-The script needs to know:
-
-- Where MATLAB is installed
-- Where to install GTSAM
-- Where to put the MATLAB toolbox
-
-#### Option A: Using a Text Editor (Recommended for First Time)
+All three scripts share the same defaults at the top:
 
 ```bash
-# Open the script with nano editor
-nano gtsam_build.sh
-
-# Or use gedit (GUI)
-gedit gtsam_build.sh
-
-# Or use VS Code
-code gtsam_build.sh
-```
-
-#### Option B: Quick Command Line
-
-```bash
-# View the configuration section
-head -50 gtsam_build.sh | tail -30
-```
-
-### Step 3: Edit Configuration Variables
-
-In the script, find this section (around line 20-30):
-
-```bash
-# Example of Configuration
-HOME_FOR_GTSAM="$HOME/GTSAM"
-GTSAM_DIR="$HOME_FOR_GTSAM/gtsam"
-BUILD_DIR="$GTSAM_DIR/build"
-MATLAB_ROOT="/usr/local/MATLAB/R2025b"
-MATLAB_TOOLBOX_PATH="$HOME/Documents/MATLAB"
+HOME_FOR_GTSAM="$HOME/GTSAM"      # parent dir for the clone
+GTSAM_DIR="$HOME_FOR_GTSAM/gtsam" # the upstream repo
+BUILD_DIR="$GTSAM_DIR/build"      # wiped + recreated each run
 INSTALL_PREFIX="/usr/local"
+GTSAM_TAG="4.2a9"
 ```
 
-**Edit these variables for your system:**
+Common CMake flags:
 
-#### Find Your MATLAB Installation Path
+| Flag                                  | Value     | Reason                                          |
+| ------------------------------------- | --------- | ----------------------------------------------- |
+| `CMAKE_BUILD_TYPE`                    | `Release` | Optimized build.                                |
+| `GTSAM_BUILD_WITH_MARCH_NATIVE`       | `OFF`     | Portable binaries.                              |
+| `GTSAM_THROW_CHEIRALITY_EXCEPTION`    | `OFF`     | Don't throw on cheirality in smart factors.     |
+| `GTSAM_BUILD_UNSTABLE`                | `ON` (library/python only) | Include `gtsam_unstable`.          |
+| `GTSAM_BUILD_TESTS`                   | `OFF`     | Skip GTSAM's own tests to save build time.      |
+| `GTSAM_BUILD_EXAMPLES_ALWAYS`         | `ON` (library/python only) | Build the example binaries.        |
+
+Parallel build uses `nproc - 1` jobs.
+
+---
+
+## Script 1 — `gtsam_build.sh` (library only)
+
+Minimal install for headless environments (no MATLAB, no Python wrapper).
+
+### Prerequisites
 
 ```bash
-# Find where MATLAB is installed
-which matlab
-
-# Typical paths:
-# R2025b: /usr/local/MATLAB/R2025b/bin/matlab
-# R2025a: /usr/local/MATLAB/R2025a/bin/matlab
-# R2024b: /usr/local/MATLAB/R2024b/bin/matlab
-# R2024a: /usr/local/MATLAB/R2024a/bin/matlab
+cmake build-essential libboost-all-dev libtbb-dev
 ```
 
-**Update MATLAB_ROOT** to match your installation:
+The script installs anything missing via `apt-get`.
 
-```bash
-# If output is: /usr/local/MATLAB/R2025b/bin/matlab
-# Then set: MATLAB_ROOT="/usr/local/MATLAB/R2025b"
-
-# If output is: /usr/local/MATLAB/R2025a/bin/matlab
-# Then set: MATLAB_ROOT="/usr/local/MATLAB/R2025a"
-```
-
-#### Customize Installation Paths (Optional)
-
-The default settings are:
-
-```bash
-# Source directory (where GTSAM will be downloaded)
-HOME_FOR_GTSAM="$HOME/GTSAM"
-
-# Installation directory (where GTSAM libraries go)
-INSTALL_PREFIX="/usr/local"
-
-# MATLAB toolbox directory
-MATLAB_TOOLBOX_PATH="$HOME/Documents/MATLAB"
-```
-
-To change them:
-
-```bash
-# Example: If you want to install in /opt instead of /usr/local
-INSTALL_PREFIX="/opt/gtsam"
-
-# Example: If your Documents folder is elsewhere
-MATLAB_TOOLBOX_PATH="/data/MATLAB"
-```
-
-### Step 4: Save Configuration Changes
-
-If using **nano editor**:
-
-- Press `Ctrl + O` (save)
-- Press `Enter` (confirm filename)
-- Press `Ctrl + X` (exit)
-
-If using **gedit or VS Code**:
-
-- Press `Ctrl + S` to save
-
-### Step 5: Make Script Executable
+### Run
 
 ```bash
 chmod +x gtsam_build.sh
-```
-
-### Step 6: Run the Installation Script
-
-```bash
-# Start the installation
 ./gtsam_build.sh
-
-# The script will show progress like:
-# ╔════════════════════════════════════════╗
-# ║ GTSAM Installation (Step 1/11)        ║
-# ║ Checking prerequisites...             ║
-# ╚════════════════════════════════════════╝
 ```
 
-**What the script does (11 steps):**
+### What it does
 
-1. ✅ Checks system dependencies
-2. ✅ Verifies MATLAB installation
-3. ✅ Cleans previous build
-4. ✅ Configures with CMake
-5. ✅ Builds GTSAM (takes 10-20 min)
-6. ✅ Optional testing
-7. ✅ Installs system-wide (may ask for password)
-8. ✅ Fixes C++ library issues
-9. ✅ Configures library paths
-10. ✅ Verifies installation
-11. ✅ Creates startup scripts
+1. Installs missing apt packages.
+2. Clones `borglab/gtsam` to `~/GTSAM/gtsam` if not present, checks out tag `4.2a9`.
+3. Wipes and recreates `$BUILD_DIR`.
+4. Configures CMake with `GTSAM_BUILD_PYTHON=OFF`, `GTSAM_INSTALL_MATLAB_TOOLBOX=OFF`.
+5. Builds with `make -j$(nproc-1)`.
+6. Installs via `sudo make install`.
+7. Writes `/etc/ld.so.conf.d/gtsam.conf` and runs `ldconfig`.
+8. Verifies that `GTSAM_THROW_CHEIRALITY_EXCEPTION` is **not** defined in the installed `config.h` (fails if it is).
+9. Confirms `libgtsam.so` is registered in `ldconfig`.
 
-**⏱️ Total time: 20-40 minutes** (mainly waiting for compilation)
+### When to use
 
-### Step 7: Apply Configuration to Your System
-
-After the script completes:
-
-```bash
-# Update your shell with new library paths
-source ~/.bashrc
-
-# Verify library paths are set
-echo $LD_LIBRARY_PATH
-# Should contain: /usr/local/lib
-```
-
-### Step 8: Verify Installation Success
-
-```bash
-# Check GTSAM libraries were installed
-ls -la /usr/local/lib/libgtsam*
-
-# Check MATLAB MEX file
-ls -la ~/Documents/MATLAB/gtsam_wrapper.mexa64
-
-# Check system knows about the library
-ldconfig -p | grep libgtsam
-```
+- Building from inside a container (distrobox, Docker) for downstream ROS/catkin packages.
+- CI machines without MATLAB.
+- You only need the C++ headers and libraries.
 
 ---
 
-## Using the MATLAB Test
+## Script 2 — `gtsam_matlab_build.sh` (library + MATLAB toolbox)
 
-### Step 1: Start MATLAB
+Full installation including the MATLAB toolbox and the MATLAB `libstdc++` compatibility fix.
+
+### Prerequisites
 
 ```bash
+cmake build-essential libboost-all-dev libtbb-dev python3-dev
+```
+
+Plus a working MATLAB installation. By default the script expects:
+
+```bash
+MATLAB_ROOT="/usr/local/MATLAB/R2025b"
+MATLAB_TOOLBOX_PATH="$HOME/Documents/MATLAB"
+```
+
+Find your MATLAB root with `which matlab` and edit the variable if different (e.g. `R2024b`, `R2025a`).
+
+### Run
+
+```bash
+chmod +x gtsam_matlab_build.sh
+./gtsam_matlab_build.sh
+```
+
+### What it does (9 steps)
+
+1. **Step 1** — Check apt prerequisites and verify `MATLAB_ROOT` and `mex` exist.
+2. **Step 2** — Clone GTSAM (if missing), fetch tags, checkout `4.2a9`.
+3. **Step 2.5** — Install the `gtwrap` Python module from `gtsam/wrap` (`pip3 install --break-system-packages .`, falls back to `--user`). Logs to `/tmp/gtwrap_install.log`. Imports it to confirm.
+4. **Step 3** — Wipe and recreate `$BUILD_DIR`.
+5. **Step 4** — Configure CMake with `GTSAM_INSTALL_MATLAB_TOOLBOX=ON`, `MATLAB_ROOT`, `MEX_COMMAND`, `GTSAM_TOOLBOX_INSTALL_PATH`. **Pauses for confirmation** before building.
+6. **Step 5** — Build with `make -j$(nproc-1)`. Takes 10–30 minutes.
+7. **Step 6** — `sudo make install`.
+8. **Step 6.5** — Append `/usr/local/lib` to `/etc/ld.so.conf.d/gtsam.conf`, run `ldconfig`, verify `libgtsam.so.4` is registered.
+9. **Step 7** — Fix MATLAB's stale `libstdc++.so.6` by backing up `$MATLAB_ROOT/sys/os/glnxa64/libstdc++.so.6` and `$MATLAB_ROOT/bin/glnxa64/libstdc++.so.6` to `.old` and symlinking the system's `/usr/lib/x86_64-linux-gnu/libstdc++.so.6` in their place. This resolves `GLIBCXX_3.4.32 not found` errors when loading the MEX wrapper.
+10. **Step 8** — Append a `LD_LIBRARY_PATH` export to `~/.bashrc` guarded by a `GTSAM_LD_LIBRARY_PATH` sentinel (idempotent).
+11. **Step 9** — Verify GTSAM headers, libraries, MATLAB `+gtsam` toolbox dir, and `gtsam_wrapper.mexa64` all exist.
+
+### After it finishes
+
+```bash
+source ~/.bashrc
 matlab &
 ```
 
-Wait for MATLAB to fully open (usually 10-20 seconds).
-
-### Step 2: Add GTSAM to MATLAB Path
-
-In the MATLAB Command Window, type:
+In MATLAB:
 
 ```matlab
 addpath('~/Documents/MATLAB')
 savepath
-```
-
-**What this does:**
-
-- Adds GTSAM to MATLAB's search path
-- `savepath` makes it permanent (survives MATLAB restart)
-
-### Step 3: Run the Test Script
-
-In the MATLAB Command Window, type:
-
-```matlab
 gtsam_test
 ```
 
-### Step 4: Verify All Tests Pass
+You should see all 10 tests PASS (see [Verification](#verification)).
 
-If successful, you should see:
+### When to use
+
+- You need to call GTSAM from MATLAB scripts.
+- You are running MATLAB on the same host as the build (the MATLAB libstdc++ fix is host-specific).
+
+---
+
+## Script 3 — `gtsam_python_build` (library + Python wrapper)
+
+Installs the GTSAM C++ library and the Python bindings so `import gtsam` works from `python3`.
+
+### Prerequisites
+
+```bash
+cmake build-essential libboost-all-dev libtbb-dev \
+python3-dev python3-pip python3-numpy
+```
+
+Plus `pyparsing` (installed automatically by the script if missing).
+
+### Run
+
+```bash
+chmod +x gtsam_python_build
+./gtsam_python_build
+```
+
+### What it does
+
+1. Installs missing apt packages.
+2. Ensures `pyparsing` is importable (`pip3 install --break-system-packages pyparsing`, fallback to `--user`).
+3. Clones GTSAM, checks out `4.2a9`, runs `git submodule update --init --recursive`.
+4. Installs `gtwrap` from `gtsam/wrap` via `pip3`.
+5. Wipes and recreates `$BUILD_DIR`.
+6. Detects Python version via `sys.version_info` and passes it as `GTSAM_PYTHON_VERSION`.
+7. Configures CMake with `GTSAM_BUILD_PYTHON=ON`, `GTSAM_INSTALL_MATLAB_TOOLBOX=OFF`.
+8. Builds the C++ library with `make -j$(nproc-1)`.
+9. `sudo make install` for the C++ library.
+10. Builds and installs the Python wrapper: `make -j python-install`.
+11. Registers `/usr/local/lib` in ldconfig.
+12. Verifies the cheirality flag is off in `config.h`.
+13. Imports `gtsam` from Python to confirm the wrapper is on `sys.path`.
+
+### Verify
+
+```bash
+python3 -c "import gtsam; print(gtsam.__version__ if hasattr(gtsam,'__version__') else '4.2a9')"
+```
+
+### When to use
+
+- Python-based SLAM/factor-graph development.
+- You do not need MATLAB integration.
+
+---
+
+## Verification
+
+### MATLAB (after `gtsam_matlab_build.sh`)
+
+```matlab
+addpath('~/Documents/MATLAB')
+gtsam_test
+```
+
+Expected output:
 
 ```
-╔════════════════════════════════════════════════════════════════╗
-║      GTSAM MATLAB Toolbox - Basic Installation Test           ║
-╚════════════════════════════════════════════════════════════════╝
-
 [Test 1] Importing gtsam namespace... ✓ PASSED
 [Test 2] Creating basic GTSAM objects... ✓ PASSED
 [Test 3] Creating NonlinearFactorGraph... ✓ PASSED
@@ -280,290 +245,109 @@ If successful, you should see:
 [Test 8] Adding factor to graph... ✓ PASSED
 [Test 9] Inserting initial estimate... ✓ PASSED
 [Test 10] Creating LevenbergMarquardtOptimizer... ✓ PASSED
-
-╔════════════════════════════════════════════════════════════════╗
-║                    ALL TESTS PASSED! ✓                         ║
-║                                                                ║
-║      GTSAM MATLAB Toolbox is correctly installed and           ║
-║      ready for use!                                            ║
-╚════════════════════════════════════════════════════════════════╝
 ```
 
-### Step 5: Start Using GTSAM in MATLAB
-
-Now you can use GTSAM! Example:
-
-```matlab
-% Import GTSAM
-import gtsam.*
-
-% Create a factor graph
-graph = NonlinearFactorGraph();
-
-% Create optimization variables
-values = Values();
-
-% Create a 3D pose
-pose = Pose3();
-
-% Add initial values
-values.insert(0, pose);
-
-% Create noise model
-noiseModel = noiseModel.Isotropic.Sigma(6, 0.1);
-
-% Add prior constraint
-prior = PriorFactorPose3(0, pose, noiseModel);
-graph.add(prior);
-
-% Optimize
-params = LevenbergMarquardtParams();
-optimizer = LevenbergMarquardtOptimizer(graph, values, params);
-result = optimizer.optimize();
-
-disp('GTSAM is working!')
-```
-
----
-
-## Configuration Quick Reference
-
-### Common Configuration Changes
-
-**If MATLAB is in a different location:**
+### C++ library
 
 ```bash
-# Find MATLAB location
-which matlab
-
-# Update the script
-nano gtsam_build.sh
-# Change: MATLAB_ROOT="/usr/local/MATLAB/R2025b"
-# To your MATLAB path
+ls /usr/local/lib/libgtsam*
+ldconfig -p | grep libgtsam
+ls /usr/local/include/gtsam/config.h
 ```
 
-**If you want to install in a different directory:**
+`config.h` must **not** contain a `#define GTSAM_THROW_CHEIRALITY_EXCEPTION` line.
+
+### Python
 
 ```bash
-nano gtsam_build.sh
-# Change: INSTALL_PREFIX="/usr/local"
-# To: INSTALL_PREFIX="/opt/gtsam" or any other path
-# Note: Might need sudo to install in system directories
-```
-
-**If your MATLAB Documents folder is different:**
-
-```bash
-nano gtsam_build.sh
-# Change: MATLAB_TOOLBOX_PATH="$HOME/Documents/MATLAB"
-# To your actual Documents location
+python3 -c "import gtsam; g = gtsam.NonlinearFactorGraph(); print('ok')"
 ```
 
 ---
 
 ## Troubleshooting
 
-### Problem 1: Script says "MATLAB not found"
+### `ERROR: MATLAB not found at /usr/local/MATLAB/R2025b`
 
-**Error:** `ERROR: MATLAB not found at /usr/local/MATLAB/R2025b`
+Edit `MATLAB_ROOT` at the top of `gtsam_matlab_build.sh` to match `dirname $(dirname $(which matlab))`.
 
-**Solution:**
-
-1. Find your MATLAB: `which matlab`
-2. Edit the script: `nano gtsam_build.sh`
-3. Update `MATLAB_ROOT` to correct path
-4. Run script again: `./gtsam_build.sh`
-
-### Problem 2: "gtwrap installation failed"
-
-**Error:** `ERROR: gtwrap installation failed`
-
-**Solution:**
+### `gtwrap installation failed`
 
 ```bash
-# Check the error log
 cat /tmp/gtwrap_install.log
-
-# Try manual installation
 pip3 install --user ~/GTSAM/gtsam/wrap
 ```
 
-### Problem 3: MATLAB gtsam_test shows "cannot find libgtsam.so.4"
+### MATLAB: `libgtsam.so.4: cannot open shared object file`
 
-**Error:** `libgtsam.so.4: cannot open shared object file`
-
-**Solution:**
+The `ldconfig` step in the script should prevent this. If you still hit it:
 
 ```bash
-# Set library path before starting MATLAB
 export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
-
-# Or permanently add to ~/.bashrc
-echo "export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH" >> ~/.bashrc
-source ~/.bashrc
-
-# Then restart MATLAB
 matlab &
 ```
 
-### Problem 4: MATLAB C++ error about libstdc++
+### MATLAB: `version 'GLIBCXX_3.4.32' not found`
 
-**Error:** `version 'GLIBCXX_3.4.32' not found`
-
-**Solution:** The installation script should have fixed this automatically, but if not:
+Step 7 of `gtsam_matlab_build.sh` should already have replaced MATLAB's bundled `libstdc++.so.6` with a symlink to the system one. To redo it manually for `R2025b`:
 
 ```bash
-# Manually fix MATLAB's C++ library
 sudo mv /usr/local/MATLAB/R2025b/sys/os/glnxa64/libstdc++.so.6 \
         /usr/local/MATLAB/R2025b/sys/os/glnxa64/libstdc++.so.6.old
-
 sudo ln -s /usr/lib/x86_64-linux-gnu/libstdc++.so.6 \
            /usr/local/MATLAB/R2025b/sys/os/glnxa64/libstdc++.so.6
-
-# Restart MATLAB
-matlab &
 ```
 
-### Problem 5: gtsam_test shows some tests FAILED
+### Cheirality exception verification failed
 
-**Solution:** One of the GTSAM components didn't load properly.
-
-```bash
-# Check library dependencies
-ldd ~/Documents/MATLAB/gtsam_wrapper.mexa64 | grep "not found"
-
-# If you see "not found" items, fix library paths:
-export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
-
-# Restart MATLAB and try again
-```
-
-### Problem 6: Script asks for password (sudo)
-
-**This is normal!** The script needs sudo to:
-
-- Install libraries system-wide
-- Modify MATLAB's C++ library
-- Update system library cache
-
-Just enter your password when prompted.
-
----
-
-## Quick Command Reference
-
-### Viewing Logs and Checking Installation
+The library-only and Python scripts exit non-zero if `GTSAM_THROW_CHEIRALITY_EXCEPTION` is still defined in the installed `config.h`. This usually means an older GTSAM install is still in `/usr/local`. Clean and re-run:
 
 ```bash
-# View gtwrap installation log
-cat /tmp/gtwrap_install.log
-
-# Check if GTSAM libraries installed
-ls -la /usr/local/lib/libgtsam*
-
-# Check if MATLAB MEX file exists
-ls -la ~/Documents/MATLAB/gtsam_wrapper.mexa64
-
-# Check library dependencies
-ldd ~/Documents/MATLAB/gtsam_wrapper.mexa64
-
-# Check system library registry
-ldconfig -p | grep libgtsam
-```
-
-### Re-running Installation
-
-```bash
-# Clean and start over
-cd ~/GTSAM/gtsam
-rm -rf build
-
-# Run script again
-cd FULL-PATH/gtsam-matlab-installation
+sudo rm -rf /usr/local/include/gtsam /usr/local/lib/libgtsam* /usr/local/lib/cmake/GTSAM
 ./gtsam_build.sh
 ```
 
----
+### Python: `import gtsam` succeeds but `gtsam.__version__` missing
 
-## Next Steps
+GTSAM 4.2a9 does not always expose `__version__`. The script handles this and prints `4.2a9` as a fallback.
 
-After successful installation:
+### Re-running a build
 
-1. ✅ Understand GTSAM basics: http://gtsam.org/tutorials/intro.html
-2. ✅ Read API documentation: https://borglab.org/gtsam/doxygen/
-3. ✅ Build your own SLAM application
-4. ✅ Explore example projects
+The scripts always wipe `$BUILD_DIR` on entry, so a re-run is safe:
 
----
+```bash
+./gtsam_build.sh           # or gtsam_matlab_build.sh / gtsam_python_build
+```
 
-## File Summary
+If you also want to drop the installed artifacts:
 
-| File             | Lines     | Purpose                        |
-| ---------------- | --------- | ------------------------------ |
-| `gtsam_build.sh` | 200+      | Automated 11-step installation |
-| `gtsam_test.m`   | 100+      | 10-test verification suite     |
-| `README.md`      | This file | Complete setup guide           |
+```bash
+sudo rm -rf /usr/local/include/gtsam /usr/local/lib/libgtsam* \
+            /usr/local/lib/cmake/GTSAM /usr/local/lib/python*/dist-packages/gtsam*
+```
 
 ---
 
 ## System Information
 
-| Component | Version Tested |
-| --------- | -------------- |
-| GTSAM     | 4.2a9          |
-| MATLAB    | R2024b, R2025b |
-| Ubuntu    | 24.04          |
-| CMake     | 3.10+          |
-| GCC       | 9+             |
+| Component | Version Tested        |
+| --------- | --------------------- |
+| GTSAM     | 4.2a9                 |
+| MATLAB    | R2024b, R2025a, R2025b |
+| Ubuntu    | 22.04, 24.04          |
+| CMake     | 3.10+                 |
+| GCC       | 9+                    |
+| Python    | 3.10 / 3.12           |
 
 ---
 
-## Important Notes
+## References
 
-⚠️ **Key Things to Remember:**
-
-1. **MATLAB_ROOT** - Must match your MATLAB installation path
-2. **INSTALL_PREFIX** - Default `/usr/local` works for most users
-3. **MATLAB_TOOLBOX_PATH** - Default `~/Documents/MATLAB` is recommended
-4. **Library paths** - Script configures these automatically
-5. **Sudo password** - Script will ask for it during installation
+- GTSAM upstream: <https://github.com/borglab/gtsam>
+- API docs: <https://borglab.org/gtsam/doxygen/>
+- Tutorials: <http://gtsam.org/tutorials/intro.html>
 
 ---
 
-## Getting Help
-
-### Before Installing
-
-- Check you meet all [Requirements](#requirements)
-- Read through [Step-by-Step Installation](#step-by-step-installation)
-- Verify system info with commands in "Check Your System"
-
-### During Installation
-
-- Watch the script output for errors
-- Check `/tmp/gtwrap_install.log` for detailed error logs
-- See [Troubleshooting](#troubleshooting) section
-
-### After Installation
-
-- Run `gtsam_test` in MATLAB to verify
-- Check that all 10 tests PASS
-- See [Using the MATLAB Test](#using-the-matlab-test)
-
-### Still Having Issues?
-
-- Visit: https://github.com/borglab/gtsam/issues
-- Read: http://gtsam.org/tutorials/intro.html
-- Check: https://borglab.org/gtsam/
-
----
-
-## License
-
-GTSAM is licensed under the **BSD 3-Clause License**.  
-This repository provides installation support for GTSAM.
-
----
-
-**Version**: 2.2  
-**Last Updated**: October 29, 2025
+**Version**: 2.3
+**Last Updated**: 2026-05-25
